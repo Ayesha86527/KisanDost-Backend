@@ -1,51 +1,29 @@
-import os
-from pathlib import Path
-
-# ==========================
-# 🔐 API KEYS
-# ==========================
-TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 # app/config.py
+"""
+Application configuration and constants.
+Uses environment variables where appropriate.
+"""
+
 from dotenv import load_dotenv
+from pathlib import Path
 import os
 
-# Load .env automatically
 load_dotenv()
 
-# Get API keys from environment variables
+# API keys (set in .env or Codespaces secrets)
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-DEFAULT_LANGUAGE = "en"  # optional, for voice/ocr modules
-WHISPER_MODEL = "base"    # optional
-TTS_PREFIX = "tts_"       # optional
-OUTPUT_DIRS = "output"    # optional
 
-# Optional: sanity check
-print("Loaded API keys:")
-print("TAVILY_API_KEY:", TAVILY_API_KEY)
-print("GROQ_API_KEY:", GROQ_API_KEY)
+# Default language and models
+DEFAULT_LANGUAGE = os.getenv("DEFAULT_LANGUAGE", "en")
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")
+TTS_PREFIX = os.getenv("TTS_PREFIX", "response")
 
+# OCR language: "en", "ur", "multilang", etc.
+OCR_LANG = os.getenv("OCR_LANG", "en")
 
-if not GROQ_API_KEY:
-    print("⚠️ [Warning] GROQ_API_KEY not set. Please add it to your environment variables.")
-
-# ==========================
-# 🌐 SUPPORTED LANGUAGES
-# ==========================
-LANGUAGES = {
-    "en": "English",
-    "ur": "Urdu",
-    "sd": "Sindhi"
-}
-
-DEFAULT_LANGUAGE = "en"
-
-# ==========================
-# 📁 OUTPUT DIRECTORIES
-# ==========================
+# Output directories (Path objects)
 BASE_OUTPUT = Path("outputs")
-
 OUTPUT_DIRS = {
     "voice_outputs": BASE_OUTPUT / "voice_outputs",
     "transcripts": BASE_OUTPUT / "transcripts",
@@ -53,25 +31,12 @@ OUTPUT_DIRS = {
     "ocr_outputs": BASE_OUTPUT / "ocr"
 }
 
-# Ensure directories exist
-for path in OUTPUT_DIRS.values():
-    path.mkdir(parents=True, exist_ok=True)
-
-# ==========================
-# 🧠 MODEL SETTINGS
-# ==========================
-OCR_LANG = "en"                 # PaddleOCR language (en, ur, multilang)
-WHISPER_MODEL = "base"          # Whisper ASR model (tiny, base, small, medium, large)
-GROQ_MODEL = "llama-3.1-70b-versatile"  # Chat model
-MAX_TOKENS = 1500               # Max token limit for responses
-
-# ==========================
-# 🔊 VOICE / TTS SETTINGS
-# ==========================
-TTS_PREFIX = "response"         # Default prefix for TTS files
-TTS_SPEED = False               # False = normal, True = slow voice
+# Create directories if they do not exist
+for p in OUTPUT_DIRS.values():
+    p.mkdir(parents=True, exist_ok=True)
 
 # ==========================
 # 🧩 APP SETTINGS
 # ==========================
 DEBUG = True                    # Enable for verbose logs (set False in production)
+
