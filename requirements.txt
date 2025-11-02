@@ -12,3 +12,7 @@ langchain_groq==0.3.0
 gtts 
 deep_translator 
 whisper
+pydub
+python-dotenv
+scipy
+requests
