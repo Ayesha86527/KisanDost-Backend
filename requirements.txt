@@ -16,3 +16,8 @@ pydub
 python-dotenv
 scipy
 requests
+fastapi
+uvicorn
+pydantic
+
+
