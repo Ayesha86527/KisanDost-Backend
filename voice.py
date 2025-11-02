@@ -1,110 +1,123 @@
+# app/voice.py
+"""
+Speech utilities: ASR (Whisper), translation, and TTS (gTTS).
+- Uses openai-whisper (lazy model load)
+- Uses deep_translator for optional translation
+- Uses gTTS for TTS; Sindhi falls back to Urdu if unsupported
+"""
+
+import os
 import time
 from pathlib import Path
 from gtts import gTTS
 from deep_translator import GoogleTranslator
-import whisper
+import whisper  # ensure package openai-whisper is installed
 from app.config import DEFAULT_LANGUAGE, WHISPER_MODEL, TTS_PREFIX, OUTPUT_DIRS
 
 # Ensure output directories exist
 Path(OUTPUT_DIRS["voice_outputs"]).mkdir(parents=True, exist_ok=True)
 
-# ---------- TRANSLATION ----------
-def translate_text(text, source_lang, target_lang):
+# Lazy-load Whisper model to avoid heavy import at module import in some environments
+_WHISPER_MODEL = None
+
+
+def _get_whisper_model():
+    global _WHISPER_MODEL
+    if _WHISPER_MODEL is None:
+        print(f"[ASR] Loading Whisper model: {WHISPER_MODEL}")
+        _WHISPER_MODEL = whisper.load_model(WHISPER_MODEL)
+    return _WHISPER_MODEL
+
+
+# Translation helper
+def translate_text(text: str, source_lang: str, target_lang: str) -> str:
     """
-    Translate text between English, Urdu, and Sindhi using GoogleTranslator.
-    If source and target are the same, returns the original text.
+    Translate text between languages using GoogleTranslator.
+    If source == target, returns original.
     """
     try:
-        if not text:
-            return ""
-        if source_lang == target_lang:
-            return text
+        if not text or source_lang == target_lang:
+            return text or ""
         translator = GoogleTranslator(source=source_lang, target=target_lang)
         translated = translator.translate(text)
-        print(f"[📝 Translation] {source_lang} → {target_lang}: {translated}")
+        print(f"[Translate] {source_lang} -> {target_lang}: {translated[:200]}")
         return translated
     except Exception as e:
-        print(f"[❌ Translation Error]: {e}")
+        print(f"[Translate] Error: {e}")
         return text
 
 
-# ---------- SPEECH-TO-TEXT (ASR) ----------
-def speech_to_text(audio_file_path, language=DEFAULT_LANGUAGE):
+# ASR: transcribe audio -> returns plain string (or None)
+def transcribe_audio(audio_file_path: str, language: str = DEFAULT_LANGUAGE) -> str | None:
     """
-    Convert speech to text using Whisper.
-    Supports English (en), Urdu (ur), and Sindhi (sd).
+    Transcribe an audio file using Whisper.
+    Returns transcribed text (string) or None on failure.
+    language should be 'en', 'ur', or 'sd' if supported by model.
     """
-    lang_map = {"en": "en", "ur": "ur", "sd": "sd"}
     try:
-        print(f"[🎤 Whisper] Transcribing audio ({language})...")
-        model = whisper.load_model(WHISPER_MODEL)
-        result = model.transcribe(audio_file_path, language=lang_map.get(language, "en"))
-        transcript = result.get("text", "").strip()
-        print(f"[✅ ASR Transcript]: {transcript}")
-        return {"text": transcript, "language": language}
+        model = _get_whisper_model()
+        lang_map = {"en": "en", "ur": "ur", "sd": "sd"}
+        lang_code = lang_map.get(language, "en")
+        print(f"[ASR] Transcribing file: {audio_file_path} (lang={lang_code})")
+        result = model.transcribe(audio_file_path, language=lang_code)
+        text = result.get("text", "").strip()
+        print(f"[ASR] Transcript (first 200 chars): {text[:200]}")
+        return text
     except Exception as e:
-        print(f"[❌ ASR Error]: {e}")
+        print(f"[ASR] Error: {e}")
         return None
 
 
-# ---------- CLEAN TEXT FOR URDU/SINDHI ----------
-def clean_text_urdu_sindhi(text, lang):
-    """
-    Normalize punctuation for Urdu and Sindhi outputs.
-    """
-    if lang in ["ur", "sd"]:
+# Normalize punctuation for Urdu/Sindhi
+def _clean_local_punctuation(text: str, lang: str) -> str:
+    if not text:
+        return ""
+    if lang in ("ur", "sd"):
         replacements = {",": "،", ".": "۔", "?": "؟", "!": "!"}
-        for eng, local in replacements.items():
-            text = text.replace(eng, local)
+        for eng, loc in replacements.items():
+            text = text.replace(eng, loc)
     return text.strip()
 
 
-# ---------- TEXT-TO-SPEECH (TTS) ----------
-def text_to_speech(text, language=DEFAULT_LANGUAGE, filename_prefix=TTS_PREFIX):
+# TTS: generate mp3 path (returns str path or None)
+def text_to_speech(text: str, language: str = DEFAULT_LANGUAGE, filename_prefix: str = TTS_PREFIX) -> str | None:
     """
-    Generate voice output using gTTS.
-    Sindhi falls back to Urdu (gTTS doesn't support Sindhi natively).
-    Returns path to generated .mp3 file.
+    Convert text to speech using gTTS.
+    Sindhi falls back to Urdu for TTS playback if not supported.
+    Returns path to generated mp3 or None.
     """
-    gtts_lang = {"en": "en", "ur": "ur", "sd": "ur"}.get(language, "en")
-    text = clean_text_urdu_sindhi(text, language)
-    timestamp = int(time.time())
-    output_path = OUTPUT_DIRS["voice_outputs"] / f"{filename_prefix}_{language}_{timestamp}.mp3"
-
     try:
-        if not text.strip():
-            print("[⚠️ TTS Warning] Empty text, skipping audio generation.")
+        if not text or not str(text).strip():
+            print("[TTS] Empty text provided, skipping TTS.")
             return None
 
-        print(f"[🔊 TTS] Generating voice in {language.upper()}...")
-        tts = gTTS(text=text, lang=gtts_lang, slow=False)
-        tts.save(str(output_path))
-        print(f"[✅ TTS Saved]: {output_path}")
-        return str(output_path)
+        # Determine gTTS language code; fallback for Sindhi
+        available = None
+        try:
+            # tts_langs only available in newer gTTS; wrap in try
+            from gtts.lang import tts_langs
+            available = tts_langs()
+        except Exception:
+            available = {}
+
+        requested = language if language in ("en", "ur") else "ur"
+        if available and requested not in available:
+            print(f"[TTS] Language '{language}' not supported by gTTS, falling back to 'ur'")
+            requested = "ur"
+
+        out_dir = Path(OUTPUT_DIRS["voice_outputs"])
+        out_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = int(time.time())
+        filename = f"{filename_prefix}_{requested}_{timestamp}.mp3"
+        out_path = out_dir / filename
+
+        text = _clean_local_punctuation(text, language)
+        print(f"[TTS] Generating TTS (lang={requested}) -> {out_path}")
+        tts = gTTS(text=text, lang=requested, slow=False)
+        tts.save(str(out_path))
+        print(f"[TTS] Saved: {out_path}")
+        return str(out_path)
     except Exception as e:
-        print(f"[❌ TTS Error]: {e}")
+        print(f"[TTS] Error: {e}")
         return None
 
-
-# ---------- PIPELINE HELPER (OPTIONAL) ----------
-def process_voice_pipeline(audio_file_path, language=DEFAULT_LANGUAGE):
-    """
-    End-to-end pipeline:
-    1. Speech-to-text (ASR)
-    2. Translation (if needed)
-    3. Text-to-speech (TTS)
-    Returns both transcript and generated voice path.
-    """
-    asr_result = speech_to_text(audio_file_path, language)
-    if not asr_result:
-        return None
-
-    transcript = asr_result["text"]
-    translated_text = translate_text(transcript, source_lang=language, target_lang=DEFAULT_LANGUAGE)
-    tts_path = text_to_speech(translated_text, language=language)
-    
-    return {
-        "transcript": transcript,
-        "translated": translated_text,
-        "tts_path": tts_path
-    }
