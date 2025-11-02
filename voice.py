@@ -3,7 +3,7 @@ from pathlib import Path
 from gtts import gTTS
 from deep_translator import GoogleTranslator
 import whisper
-from config import DEFAULT_LANGUAGE, WHISPER_MODEL, TTS_PREFIX, OUTPUT_DIRS
+from app.config import DEFAULT_LANGUAGE, WHISPER_MODEL, TTS_PREFIX, OUTPUT_DIRS
 
 # Ensure output directories exist
 Path(OUTPUT_DIRS["voice_outputs"]).mkdir(parents=True, exist_ok=True)
