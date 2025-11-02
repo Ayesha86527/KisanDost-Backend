@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kisan Dost</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=Noto+Nastaliq+Urdu:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Landing Page -->
+        <div class="page landing-page active" id="landing-page">
+            <div class="logo-container">
+                <div class="logo-placeholder">
+                    <img src="logo.jpg" alt="Kisan Dost Logo">
+                </div>
+                <h1 class="app-name">Kisan Dost</h1>
+            </div>
+            <p class="tagline" data-translate="tagline">I help you grow healthier crops.</p>
+            <button class="btn btn-primary" id="start-btn" data-translate="start-btn">Let's Start</button>
+            <button class="btn btn-secondary" id="language-btn" data-translate="language-btn">Select Language</button>
+        </div>
+
+        <!-- Language Selection Page -->
+        <div class="page language-page" id="language-page">
+            <button class="back-btn" id="lang-back-btn">←</button>
+            <div class="page-header">
+                <h2 data-translate="select-language">Select Language</h2>
+            </div>
+            <div class="language-options">
+                <div class="language-option" data-lang="en">English</div>
+                <div class="language-option" data-lang="ur">اردو (Urdu)</div>
+                <div class="language-option" data-lang="sd">سنڌي (Sindhi)</div>
+            </div>
+        </div>
+
+        <!-- Scan Page -->
+        <div class="page scan-page" id="scan-page">
+            <button class="back-btn" id="scan-back-btn">←</button>
+            <div class="scan-options">
+                <h2 data-translate="scan-title">Capture Product</h2>
+                <div class="camera-container">
+                    <video id="camera-feed" autoplay playsinline></video>
+                    <div class="scan-frame"></div>
+                </div>
+                <div class="action-buttons">
+                    <button class="btn btn-primary" id="capture-photo-btn" data-translate="capture-btn">
+                        📷 Capture Photo
+                    </button>
+                    <button class="btn btn-secondary" id="upload-photo-btn" data-translate="upload-btn">
+                        🖼️ Upload from Gallery
+                    </button>
+                    <input type="file" id="file-input" accept="image/*" style="display: none;">
+                </div>
+            </div>
+            <div class="loader" id="loader"></div>
+        </div>
+
+        <!-- Chat Page -->
+        <div class="page chat-page" id="chat-page">
+            <div class="chat-header">
+                <button class="back-btn" id="chat-back-btn">←</button>
+                <h3 data-translate="chat-title">Kisan Dost</h3>
+            </div>
+            <div class="chat-window" id="chat-window">
+                <!-- Messages will be dynamically added here -->
+            </div>
+            <div class="chat-input-container">
+                <button class="icon-btn mic-btn" id="mic-btn">
+                    <span class="mic-icon">🎤</span>
+                    <span class="mic-text" data-translate="tap-to-speak">Tap to speak</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
