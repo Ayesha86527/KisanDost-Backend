@@ -1,0 +1,14 @@
+paddlepaddle==2.6.1
+paddleocr==2.8.1 
+pillow==10.4.0 
+opencv-python-headless==4.10.0.84 
+numpy==1.26.4
+langchain==0.2.16 
+langchain-core==0.2.43 
+langchain-community==0.2.11
+langgraph==0.2.15
+tavily-python==0.3.3
+langchain_groq==0.3.0
+gtts 
+deep_translator 
+whisper
