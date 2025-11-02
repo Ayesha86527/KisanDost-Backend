@@ -1,6 +1,6 @@
 from paddleocr import PaddleOCR
 from pathlib import Path
-from config import OCR_LANG, OUTPUT_DIRS
+from app.config import OCR_LANG, OUTPUT_DIRS
 
 # ---------- SETUP ----------
 # Ensure OCR output directory exists
