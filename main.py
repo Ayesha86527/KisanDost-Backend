@@ -1,217 +1,277 @@
-"""
-FarmGuide - Main Pipeline (FIXED - No features removed)
-Fixes: ASR errors, Agent message handling, TTS issues
-"""
-
-from app import (
-    run_ocr, 
-    speech_to_text, 
-    text_to_speech, 
-    initialize_agent, 
-    chat_completion, 
-    run_query, 
-    DEFAULT_LANGUAGE
-)
-from dotenv import load_dotenv
-import os
+import shutil
+import subprocess
 from pathlib import Path
+from typing import Optional
 
-# Load environment variables
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from dotenv import load_dotenv
+
+# Load environment variables from .env
 load_dotenv()
 
-print("\n" + "="*70)
-print("🌾 FARMGUIDE - COMPLETE PIPELINE")
-print("="*70)
+# Import your app modules
+from app.config import OUTPUT_DIRS, DEFAULT_LANGUAGE
+from app.ocr import run_ocr
+from app.voice import speech_to_text, text_to_speech, translate_text
+from app.agent import initialize_agent, chat_completion, run_query
 
-# Verify API keys
-tavily_key = os.getenv("TAVILY_API_KEY")
-groq_key = os.getenv("GROQ_API_KEY")
+# Create FastAPI app
+app = FastAPI(title="FarmGuide API", version="1.0")
 
-if not groq_key:
-    print("[❌] ERROR: GROQ_API_KEY not found in .env")
-    exit(1)
+# Allow CORS from React dev server (adjust origin if needed)
+ALLOWED_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-print(f"[✅] GROQ_API_KEY loaded")
-print(f"[✅] TAVILY_API_KEY loaded" if tavily_key else "[⚠️] TAVILY_API_KEY not set (optional)")
+# Mount static folder to serve generated audio files
+audio_dir = Path(OUTPUT_DIRS["voice_outputs"])
+audio_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/audio", StaticFiles(directory=str(audio_dir)), name="audio")
 
-# Initialize agent once
-agent_executor = initialize_agent()
+# Allowed file extensions
+ALLOWED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp"}
+ALLOWED_AUDIO_EXT = {".wav", ".mp3", ".ogg", ".webm", ".m4a"}
 
-# ============================================================
-# STEP 1: OCR PROCESSING
-# ============================================================
-
-print("\n[Step 1/4] Running OCR...")
-image_path = "data/test_images/sample.jpg"
-
-if not Path(image_path).exists():
-    print(f"[⚠️] Image not found at {image_path}")
-    print("Creating demo text instead...")
-    ocr_text = """GREEN EARTH ORGANICS
-ALL-NATURAL FERTILIZER
-
-INGREDIENTS: COMPOSTED MANURE, WORM CASTINGS, KELP EXTRACT, BONE MEAL
-NPK VALUES: N:3%, P:4%, K:2%
-
-USAGE:
-1. MIX 1 CUP PER 5 GALLONS OF SOIL
-2. APPLY BI-WEEKLY TO PLANTS
-3. WATER THOROUGHLY
-
-CERTIFIED ORGANIC"""
-    print(f"[ℹ️] Using demo OCR text")
-else:
-    ocr_text = run_ocr(image_path)
-
-print(f"\n[📝] OCR Result:\n{ocr_text}\n")
-
-# ============================================================
-# STEP 2: SPEECH-TO-TEXT (FIXED - Handle missing audio file)
-# ============================================================
-
-print("[Step 2/4] Processing Speech-to-Text...")
-
-audio_path = "data/test_audio/sample.wav"
-user_query = ""
-
-if Path(audio_path).exists():
-    print(f"[🎤] Audio file found: {audio_path}")
-    stt_result = speech_to_text(audio_path, language="ur")
-    
-    if stt_result and stt_result.get('text'):
-        user_query = stt_result['text']
-        print(f"[✅] Transcribed: {user_query}")
-    else:
-        print("[⚠️] Speech-to-text failed, using default query")
-        user_query = "Is this fertilizer safe for wheat crops? How often should I apply it?"
-else:
-    print(f"[⚠️] Audio file not found at {audio_path}")
-    print("[ℹ️] Using default farmer query instead")
-    user_query = "Is this fertilizer safe for wheat crops? How often should I apply it?"
-
-print(f"[🗣️] Farmer Query: {user_query}\n")
-
-# ============================================================
-# STEP 3: RUN AGENT (FIXED - Message object handling)
-# ============================================================
-
-print("[Step 3/4] Running AI Agent Analysis...\n")
-
-# Combine OCR text and farmer query
-combined_input = f"""Product Label (from OCR):
-{ocr_text}
-
-Farmer's Question:
-{user_query}
-
-Please analyze this agricultural product and answer the farmer's question."""
-
-# Create message for agent
-input_messages = chat_completion(combined_input)
-
-# Run agent query with proper message handling
-config = {"configurable": {"thread_id": "farmguide-demo"}}
-response_text = ""
-
+# Initialize agent at startup (lazy initialize if it fails)
+AGENT = None
 try:
-    print("[💬 Agent Processing...]")
-    
-    for step in agent_executor.stream(
-        {"messages": input_messages}, 
-        config, 
-        stream_mode="values"
-    ):
-        if "messages" not in step:
-            continue
-        
-        messages = step["messages"]
-        if not messages:
-            continue
-        
-        latest_msg = messages[-1]
-        
-        # FIXED: Handle LangChain message objects properly
-        if hasattr(latest_msg, 'content') and hasattr(latest_msg, 'type'):
-            # This is a LangChain message object
-            if latest_msg.type == "ai":
-                response_text = latest_msg.content
-        
-        # Fallback: Handle dict-style messages
-        elif isinstance(latest_msg, dict):
-            if latest_msg.get("role") == "assistant":
-                response_text = latest_msg.get("content", "")
-
-except Exception as e:
-    print(f"[⚠️] Agent error: {e}")
-    print("[ℹ️] Using fallback response...")
-    response_text = f"""Based on the fertilizer label analysis:
-
-This is an organic fertilizer with NPK ratio of 3-4-2, suitable for general plant growth.
-
-For wheat crops:
-- This balanced organic fertilizer works well
-- Apply 1 cup per 5 gallons of soil
-- Apply bi-weekly (every 2 weeks)
-- Water thoroughly after application
-- Being organic, it's safe for sustainable farming
-
-Recommendation: Use according to label instructions."""
-
-# Print agent response
-print("\n" + "="*70)
-print("[🤖 AGENT RESPONSE]:")
-print("="*70)
-print(response_text)
-print("="*70 + "\n")
-
-# ============================================================
-# STEP 4: TEXT-TO-SPEECH (TRANSLATE FIRST, THEN GENERATE VOICE)
-# ============================================================
-
-from app.voice import text_to_speech, translate_text
-
-print("[Step 4/4] Generating Voice Responses...\n")
-
-# Ensure response text is not empty
-if not response_text or not str(response_text).strip():
-    response_text = "Analysis complete. Please refer to the product label for detailed instructions."
-
-# Limit text length for quality TTS output
-response_text = str(response_text)[:500]
-
-# Translate text for each language
-tts_text_en = response_text  # English remains the same
-tts_text_ur = translate_text(response_text, source_lang="en", target_lang="ur")
-tts_text_sd = translate_text(response_text, source_lang="en", target_lang="sd")  # Sindhi fallback to Urdu voice
-
-# Generate TTS audio
-tts_file_en = text_to_speech(tts_text_en, language="en", filename_prefix="agent_response")
-tts_file_ur = text_to_speech(tts_text_ur, language="ur", filename_prefix="agent_response")
-tts_file_sd = text_to_speech(tts_text_sd, language="sd", filename_prefix="agent_response")
-
-# Print output paths
-print("\n[📁 Voice Outputs]:")
-print(f"  📄 English: {tts_file_en}")
-print(f"  📄 Urdu:    {tts_file_ur}")
-print(f"  📄 Sindhi:  {tts_file_sd}\n")
+    AGENT = initialize_agent()
+except Exception:
+    AGENT = None
 
 
-# ============================================================
-# SUMMARY
-# ============================================================
+def save_upload(upload: UploadFile, dest_folder: Path) -> Path:
+    """
+    Save an UploadFile to the given folder and return the saved Path.
+    """
+    dest_folder.mkdir(parents=True, exist_ok=True)
+    dest_path = dest_folder / upload.filename
+    with open(dest_path, "wb") as f:
+        shutil.copyfileobj(upload.file, f)
+    return dest_path
 
-print("\n" + "="*70)
-print("✅ PIPELINE COMPLETE!")
-print("="*70)
-print(f"\n[📁] Output Files Generated:")
-print(f"  📄 English Audio: {tts_file_en}")
-print(f"  📄 Urdu Audio: {tts_file_ur}")
-print(f"  📄 Sindhi Audio: {tts_file_sd}")
-print(f"\n[📍] All outputs saved in: ./outputs/\n")
 
-print("[📋 PIPELINE SUMMARY]")
-print(f"  ✅ OCR: Extracted product label")
-print(f"  ✅ ASR: Processed farmer query")
-print(f"  ✅ Agent: Generated analysis")
-print(f"  ✅ TTS: Generated voice responses (EN, UR, SD)")
-print("\n[🎉 All systems operational!]\n")
+def check_ffmpeg_available():
+    """
+    Check if ffmpeg is available on PATH.
+    """
+    try:
+        subprocess.run(["ffmpeg", "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except Exception:
+        return False
+
+
+def convert_to_wav(input_path: Path) -> Path:
+    """
+    Convert uploaded audio to WAV (mono, 16 kHz) using ffmpeg.
+    If input is already WAV, return it directly.
+    """
+    if input_path.suffix.lower() == ".wav":
+        return input_path
+
+    if not check_ffmpeg_available():
+        raise HTTPException(status_code=500, detail="ffmpeg is required to convert audio. Please install ffmpeg.")
+
+    out_path = input_path.with_suffix(".wav")
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(input_path),
+        "-ac", "1",
+        "-ar", "16000",
+        str(out_path),
+    ]
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return out_path
+    except subprocess.CalledProcessError:
+        raise HTTPException(status_code=500, detail="Failed to convert audio to WAV.")
+
+
+class QueryRequest(BaseModel):
+    ocr_text: Optional[str] = ""
+    farmer_query: Optional[str] = ""
+    language: Optional[str] = DEFAULT_LANGUAGE
+
+
+@app.post("/api/ocr")
+async def endpoint_ocr(image: UploadFile = File(...)):
+    """
+    Upload an image and return OCR text.
+    Accepts: jpg, jpeg, png, webp
+    """
+    suffix = Path(image.filename).suffix.lower()
+    if suffix not in ALLOWED_IMAGE_EXT:
+        raise HTTPException(status_code=400, detail="Unsupported image type. Allowed: JPG, PNG, WEBP.")
+
+    try:
+        saved = save_upload(image, OUTPUT_DIRS["ocr_outputs"])
+        text = run_ocr(str(saved))
+        return {"ocr_text": text, "saved_path": str(saved)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/stt")
+async def endpoint_stt(audio: UploadFile = File(...), language: str = Form(DEFAULT_LANGUAGE)):
+    """
+    Upload audio and return transcript.
+    Accepts: wav, mp3, ogg, webm, m4a
+    """
+    suffix = Path(audio.filename).suffix.lower()
+    if suffix not in ALLOWED_AUDIO_EXT:
+        raise HTTPException(status_code=400, detail="Unsupported audio type. Allowed: WAV, MP3, OGG, WEBM, M4A.")
+
+    try:
+        saved = save_upload(audio, OUTPUT_DIRS["recordings"])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not save audio: {e}")
+
+    try:
+        wav = convert_to_wav(saved)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Audio conversion error: {e}")
+
+    asr_result = speech_to_text(str(wav), language=language)
+    if not asr_result:
+        raise HTTPException(status_code=500, detail="Transcription failed.")
+    return {"transcript": asr_result["text"], "language": asr_result["language"], "saved_path": str(saved)}
+
+
+@app.post("/api/query")
+async def endpoint_query(req: QueryRequest):
+    """
+    Send OCR text and farmer query to the agent.
+    Returns agent text, translated text and audio URL (if TTS generated).
+    """
+    ocr_text = req.ocr_text or ""
+    farmer_query = req.farmer_query or ""
+    language = req.language or DEFAULT_LANGUAGE
+
+    combined_input = f"OCR Text:\n{ocr_text}\n\nFarmer Query:\n{farmer_query}"
+
+    # Prepare message for agent
+    input_message = chat_completion(combined_input)
+
+    global AGENT
+    if AGENT is None:
+        AGENT = initialize_agent()
+        if AGENT is None:
+            raise HTTPException(status_code=500, detail="Agent initialization failed.")
+
+    try:
+        agent_text = run_query(input_message, agent_executor=AGENT)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Agent error: {e}")
+
+    if not agent_text:
+        agent_text = "No answer available."
+
+    # Translate agent_text to user's language if needed
+    translated = agent_text
+    if language and language != "en":
+        try:
+            translated = translate_text(agent_text, source_lang="en", target_lang=language)
+        except Exception:
+            translated = agent_text
+
+    # Generate TTS in requested language
+    tts_path = None
+    if translated and str(translated).strip():
+        tts_path = text_to_speech(translated, language=language)
+
+    audio_url = f"/audio/{Path(tts_path).name}" if tts_path else None
+
+    return {"response": agent_text, "translated_response": translated, "audio_url": audio_url}
+
+
+@app.post("/api/voice-query")
+async def endpoint_voice_query(audio: UploadFile = File(...), language: str = Form(DEFAULT_LANGUAGE)):
+    """
+    Upload audio, run ASR, run agent, and return transcript + agent response + TTS audio URL.
+    """
+    suffix = Path(audio.filename).suffix.lower()
+    if suffix not in ALLOWED_AUDIO_EXT:
+        raise HTTPException(status_code=400, detail="Unsupported audio type.")
+
+    try:
+        saved = save_upload(audio, OUTPUT_DIRS["recordings"])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not save audio: {e}")
+
+    try:
+        wav = convert_to_wav(saved)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Audio conversion error: {e}")
+
+    asr_result = speech_to_text(str(wav), language=language)
+    if not asr_result:
+        raise HTTPException(status_code=500, detail="Transcription failed.")
+    user_text = asr_result["text"]
+
+    combined_input = f"OCR Text:\n\nFarmer Query:\n{user_text}"
+    input_message = chat_completion(combined_input)
+
+    global AGENT
+    if AGENT is None:
+        AGENT = initialize_agent()
+        if AGENT is None:
+            raise HTTPException(status_code=500, detail="Agent init failed.")
+
+    try:
+        agent_text = run_query(input_message, agent_executor=AGENT)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Agent error: {e}")
+
+    if not agent_text:
+        agent_text = "No answer available."
+
+    translated = agent_text
+    if language and language != "en":
+        try:
+            translated = translate_text(agent_text, source_lang="en", target_lang=language)
+        except Exception:
+            translated = agent_text
+
+    tts_path = None
+    if translated and str(translated).strip():
+        tts_path = text_to_speech(translated, language=language)
+
+    audio_url = f"/audio/{Path(tts_path).name}" if tts_path else None
+
+    return {
+        "transcript": user_text,
+        "response": agent_text,
+        "translated_response": translated,
+        "audio_url": audio_url,
+    }
+
+
+@app.get("/api/ping")
+async def ping():
+    return {"status": "ok"}
+
+
+# Direct file serving for audio if needed (StaticFiles already mounted at /audio)
+@app.get("/audio/{filename}")
+async def get_audio_file(filename: str):
+    file_path = audio_dir / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Audio file not found.")
+    return FileResponse(str(file_path), media_type="audio/mpeg")
+
